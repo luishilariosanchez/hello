@@ -35,7 +35,7 @@ const VERSION = "2.7" // Version bumped
 var (
 	successfulIPs       = make(map[string]struct{})
 	mapMutex            sync.Mutex
-	botToken            = "8567976895:AAGk2W_-PLcdGsdAZxHEAdnS34s5IA1-TCY"
+	botToken            = "8263323532:AAFxOOKjtvBLcKXsmvcWHwA_Z78ahZEVcTA"
 	chatIDs             = []int64{-5114002631}
 	concurrentPerWorker int
 	apiConfig           = Config{
