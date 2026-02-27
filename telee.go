@@ -768,75 +768,44 @@ func enhancedMainWorker(id int, q <-chan SSHTask, wg *sync.WaitGroup) {
 	inner.Wait()
 }
 
+// === NEW FUNCTION: FILTER GARBAGE OUTPUT ===
 func isValidShellResponse(info *ServerInfo) bool {
-    // List of strings that indicate a "garbage" or broken shell response
-    badPhrases := []string{
-        "invalid option",
-        "Too many connection attempts",
-        "Please try again later",
-        "Copyright",
-        "WARRANTY",
-        "Last login:",
-        "Connection closed",
-        "broken pipe",
-        "timeout",
-        "gpu-node",
-    }
+	// List of strings that indicate a "garbage" or broken shell response
+	// typically found in restricted shells or banners
+	badPhrases := []string{
+		"invalid option",
+		"Too many connection attempts",
+		"Please try again later",
+		"Copyright", // Often captures the banner legal text instead of hostname
+		"WARRANTY",
+		"Last login:", // Captures login msg instead of hostname
+	}
 
-    // Check if Hostname or OSInfo contains bad phrases
-    lowerHost := strings.ToLower(info.Hostname)
-    lowerOS := strings.ToLower(info.OSInfo)
+	// 1. Check if Hostname or OSInfo contains these bad phrases
+	lowerHost := strings.ToLower(info.Hostname)
+	lowerOS := strings.ToLower(info.OSInfo)
 
-    for _, phrase := range badPhrases {
-        p := strings.ToLower(phrase)
-        if strings.Contains(lowerHost, p) || strings.Contains(lowerOS, p) {
-            return false
-        }
-    }
+	for _, phrase := range badPhrases {
+		p := strings.ToLower(phrase)
+		if strings.Contains(lowerHost, p) || strings.Contains(lowerOS, p) {
+			return false
+		}
+	}
 
-    // CRITICAL: Check if we have ANY useful information
-    // If ALL these fields are empty, it's a failed/incomplete connection
-    usefulInfoCount := 0
-    
-    if strings.TrimSpace(info.Hostname) != "" {
-        usefulInfoCount++
-    }
-    if strings.TrimSpace(info.OSInfo) != "" {
-        usefulInfoCount++
-    }
-    if strings.TrimSpace(info.SSHVersion) != "" {
-        usefulInfoCount++
-    }
-    if len(info.OpenPorts) > 0 {
-        usefulInfoCount++
-    }
-    if info.CPUCores > 0 {
-        usefulInfoCount++
-    }
-    if strings.TrimSpace(info.Architecture) != "" && info.Architecture != "unknown" {
-        usefulInfoCount++
-    }
-    if strings.TrimSpace(info.CPUModel) != "" && info.CPUModel != "unknown" {
-        usefulInfoCount++
-    }
+	// 2. Length check: Hostnames shouldn't be paragraphs
+	// Real hostnames are usually short (e.g., "server1" or "ubuntu"). 
+	// Garbage output like your example is very long.
+	if len(info.Hostname) > 100 {
+		return false
+	}
+	
+	// 3. Newline check: A hostname command should return a single line.
+	// If it returns multiple lines (after trimming), it's likely a banner.
+	if strings.Count(strings.TrimSpace(info.Hostname), "\n") > 0 {
+		return false
+	}
 
-    // If we have less than 2 pieces of useful information, reject it
-    // This catches cases where everything is empty (like your example)
-    if usefulInfoCount < 2 {
-        return false
-    }
-
-    // Length check: Hostnames shouldn't be paragraphs
-    if len(info.Hostname) > 100 {
-        return false
-    }
-    
-    // Newline check: A hostname command should return a single line
-    if strings.Count(strings.TrimSpace(info.Hostname), "\n") > 0 {
-        return false
-    }
-
-    return true
+	return true
 }
 
 func processSSHTask(t SSHTask) {
