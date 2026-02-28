@@ -532,7 +532,7 @@ func sendHighScoreHoneypot(s Success) {
 	cpuModel := html.EscapeString(s.Info.CPUModel)
 	score := s.Info.HoneypotScore
 
-	msg := fmt.Sprintf(`<b>🚨 HIGH-SCORE HONEYPOT ALERT 🚨</b>
+	msg := fmt.Sprintf(`<b>🚨 HIGH SCORE HONEYPOT ALERT 🚨</b>
 
 ⚠️ <b>CRITICAL HONEYPOT DETECTED</b>
 
