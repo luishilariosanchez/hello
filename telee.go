@@ -422,17 +422,42 @@ func detectAnomalies(serverInfo *ServerInfo) int {
 	return score
 }
 
-func getIPInfo(ip string) IPInfo {
-	var info IPInfo
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get("https://ipinfo.io/" + ip + "/json")
-	if err != nil {
-		return info
+func getIPInfoMulti(ctx context.Context, ip string) (IPInfo, error) {
+	apis := []string{
+		"https://ipinfo.io/%s/json",
+		"http://ip-api.com/json/%s",
+		"https://freeipapi.com/api/json/%s",
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	json.Unmarshal(body, &info)
-	return info
+
+	var lastErr error
+
+	for _, api := range apis {
+		url := fmt.Sprintf(api, ip)
+
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			continue
+		}
+
+		var info IPInfo
+		err = json.NewDecoder(resp.Body).Decode(&info)
+		resp.Body.Close()
+
+		if err == nil {
+			return info, nil
+		}
+
+		lastErr = err
+	}
+
+	return IPInfo{}, lastErr
 }
 
 func createTelegramBot() *tgbotapi.BotAPI {
