@@ -1,4 +1,3 @@
-
 name: CI
 
 on:
@@ -56,7 +55,7 @@ jobs:
         run: |
           MAIN_IP_FILE="all_ipv4.txt"
           INSTANCE_ID=${{ matrix.instance }}
-          INSTANCE_COUNT=20
+          INSTANCE_COUNT=10
 
           echo "🔍 Instance $INSTANCE_ID of $INSTANCE_COUNT"
 
