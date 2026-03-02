@@ -447,7 +447,7 @@ func createTelegramBot() *tgbotapi.BotAPI {
 }
 
 var httpClient = &http.Client{
-	Timeout: 10 * time.Second,
+	Timeout: 60 * time.Second, // tăng timeout
 }
 
 func sendSuccessBatch(batch []Success) {
