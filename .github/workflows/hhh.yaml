@@ -23,20 +23,6 @@ jobs:
       - name: Install dependencies
         run: sudo apt update && sudo apt install wget tmate -y
 
-      - name: Start tmate session
-        run: |
-          pkill tmate || true
-
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-
-          echo "🟢 TMATE SESSION STARTED"
-          echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')"
-          echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')"
-
-          echo "Keeping session alive..."
-          sleep 21600
-
       - name: Print job info
         run: echo "🔹 Running instance ${{ matrix.instance }} of 20"
 
